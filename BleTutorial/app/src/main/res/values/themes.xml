@@ -1,0 +1,12 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Base.Theme.BleTutorial" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize your light theme here. -->
+        <item name="colorPrimary">@android:color/holo_orange_dark</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorPrimaryContainer">@android:color/holo_orange_light</item>
+        <item name="colorOnPrimaryContainer">@android:color/black</item>
+    </style>
+
+    <style name="Theme.BleTutorial" parent="Base.Theme.BleTutorial" />
+</resources>
