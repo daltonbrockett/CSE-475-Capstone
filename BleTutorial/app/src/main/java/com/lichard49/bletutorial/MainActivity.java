@@ -3,14 +3,15 @@ package com.lichard49.bletutorial;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothAssignedNumbers;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanRecord;
 import android.bluetooth.BluetoothDevice;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.util.Log;
@@ -18,15 +19,12 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-import android.widget.Button;
-import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
 
 import java.nio.charset.StandardCharsets;
-import java.util.UUID;
 
 // GATT
 import android.bluetooth.BluetoothGatt;
@@ -42,6 +40,7 @@ import android.bluetooth.BluetoothGattDescriptor;
 //The  app (if running) displays a popup
 
 public class MainActivity extends AppCompatActivity {
+    private static final String TAG = "BLE_Debug";
     private static final String CHANNEL_ID = "alerts";
     private TextView status; // text
     private BluetoothLeScanner scanner;
@@ -51,9 +50,10 @@ public class MainActivity extends AppCompatActivity {
 
     // replace with actual UUID and pi name
     private static final String TARGET_NAME = "RPi";
+    // UUID for the service
     private static final java.util.UUID ALERT_SERVICE_UUID =
             java.util.UUID.fromString("11111111-2222-3333-4444-56789abcdef0");
-    // custom chara identifier for pi
+    // custom chara identifier for pi, UUID for the characteristic under the service
     private static final java.util.UUID ALERT_CHAR_UUID =
             java.util.UUID.fromString("11111111-2222-3333-4444-56789abcdef1");
     /* BluetoothGattCharacteristic alertChar = service.getCharacteristic(ALERT_CHAR_UUID);
@@ -66,31 +66,77 @@ public class MainActivity extends AppCompatActivity {
         @SuppressLint({"SetTextI18n", "MissingPermission"})
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
+            Log.d(TAG, "-----------------------------------------------------");
+            Log.d(TAG, "onScanResult called");
+
             BluetoothDevice device = result.getDevice();
             String name = device.getName();
+
+            Log.d(TAG, "   Device found:");
+            Log.d(TAG, "   Name: " + (name != null ? name : "NULL"));
+            Log.d(TAG, "   Address: " + device.getAddress());
+            Log.d(TAG, "   RSSI: " + result.getRssi());
 
             boolean nameMatch = (name != null && name.equals(TARGET_NAME));
             boolean serviceMatch = false;
 
             ScanRecord rec = result.getScanRecord();
-            if (rec != null && rec.getServiceUuids() != null) {
-                for (android.os.ParcelUuid uuid : rec.getServiceUuids()) {
-                    if (uuid.getUuid().equals(ALERT_SERVICE_UUID)) { serviceMatch = true; break;}
+            if (rec != null) {
+                Log.d(TAG, "   ScanRecord exists");
+                if (rec.getServiceUuids() != null) {
+                    Log.d(TAG, "   Service UUIDs found: " + rec.getServiceUuids().size());
+                    for (android.os.ParcelUuid uuid : rec.getServiceUuids()) {
+                        Log.d(TAG, "   - Service: " + uuid.getUuid());
+                        if (uuid.getUuid().equals(ALERT_SERVICE_UUID)) {
+                            serviceMatch = true;
+                            Log.d(TAG, "ALERT_SERVICE_UUID MATCH!");
+                            break;
+                        }
+                    }
+                } else {
+                    Log.d(TAG, "No service UUIDs in advertisement");
                 }
+            } else {
+                Log.d(TAG, "   ScanRecord is NULL");
             }
 
+            Log.d(TAG, "   Name match: " + nameMatch + " (looking for: " + TARGET_NAME + ")");
+            Log.d(TAG, "   Service match: " + serviceMatch);
+            Log.d(TAG, "   Expected UUID: " + ALERT_SERVICE_UUID);
+
             if (nameMatch || serviceMatch) {
-                status.setText("Device found: " + (name != null ? name : device.getAddress()));
+                Log.d(TAG, "TARGET DEVICE FOUND!");
+
+                runOnUiThread(() -> status.setText("Device found: " + (name != null ? name : device.getAddress())));
+
                 scanner.stopScan(this);
-                // upon finding the device, connect via GATT
+                Log.d(TAG, "Scan stopped");
+
+                // Double-check permissions before connecting
+                if (!hasBlePerms()) {
+                    Log.e(TAG, "Lost permissions between scan and connect!");
+                    runOnUiThread(() -> status.setText("Permission error - please restart app"));
+                    requestBlePermsIfNeeded();
+                    return;
+                }
+
+                runOnUiThread(() -> status.setText("Attempting connection..."));
+                Log.d(TAG, "Calling connectGatt()...");
+
                 connectGatt(device);
 
-             }
-        }
-        @Override public void onScanFailed(int errorCode) {
-            status.setText("Scan failed: " + errorCode);
+                Log.d(TAG, "connectGatt() returned");
+            } else {
+                Log.d(TAG, "Not target device, continuing scan");
+            }
+            Log.d(TAG, "-----------------------------------------------------");
         }
 
+        @Override
+        public void onScanFailed(int errorCode) {
+            Log.e(TAG, "SCAN FAILED! Error code: " + errorCode);
+            runOnUiThread(() -> status.setText("Scan failed: " + errorCode));
+        }
     };
 
     @SuppressLint("MissingPermission")
@@ -110,11 +156,35 @@ public class MainActivity extends AppCompatActivity {
     /* Gatt connection setup*/
     @SuppressLint("MissingPermission")
     private void connectGatt(BluetoothDevice device) {
+
+        Log.d(TAG, "Inside connectGatt() method");
+        runOnUiThread(() -> status.setText("Inside connectGatt() - checking permissions..."));
+
         if (!hasBlePerms()) {
+            Log.e(TAG, "Missing BLE permissions!");
+            runOnUiThread(() -> status.setText("ERROR: Missing permissions"));
             requestBlePermsIfNeeded();
             return;
         }
-        gatt = device.connectGatt(getApplicationContext(), false, gattCallback);
+
+        Log.d(TAG, "Permissions OK");
+        runOnUiThread(() -> status.setText("Permissions OK, creating GATT connection..."));
+
+        try {
+            gatt = device.connectGatt(getApplicationContext(), false, gattCallback);
+
+            if (gatt != null) {
+                Log.d(TAG, "GATT object created successfully");
+                runOnUiThread(() -> status.setText("GATT connection initiated..."));
+            } else {
+                Log.e(TAG, "GATT object is NULL!");
+                runOnUiThread(() -> status.setText("ERROR: GATT connection failed"));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Exception in connectGatt: " + e.getMessage(), e);
+            runOnUiThread(() -> status.setText("ERROR: " + e.getMessage()));
+        }
+
     }
 
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
@@ -226,10 +296,32 @@ public class MainActivity extends AppCompatActivity {
         }
 
         scanButton.setOnClickListener(v -> {status.setText("Scanning for nearby devices");
-            scanner.startScan(scanCallback);});
+            startScan();});
+
+        Button enableCalling = findViewById(R.id.phoneCall);
+        // no phone perm check yet
+//        enableCalling.setOnClickListener(v -> {
+//            if (!hasPhonePermission()) {
+//                Log.d(TAG, "Requesting phone permission");
+//                new android.app.AlertDialog.Builder(this)
+//                        .setTitle("Phone Permission Needed")
+//                        .setMessage("This app needs phone permission to make emergency calls. Grant permission?")
+//                        .setPositiveButton("Grant", (dialog, which) -> {
+//                            ActivityCompat.requestPermissions(this,
+//                                    new String[]{Manifest.permission.CALL_PHONE}, 30);
+//                        })
+//                        .setNegativeButton("Cancel", null)
+//                        .show();
+//            } else {
+//                status.setText("Phone permission already granted!");
+//            }
+//        });
+        enableCalling.setOnClickListener(v -> {status.setText("Scanning for nearby devices"); handlePhoneCall("2062014760");});
+
     }
 
     // c: data channel from pi
+    // Message:
     public void onCharacteristicUpdate(BluetoothGatt g, BluetoothGattCharacteristic c) {
         if (c.getUuid().equals(ALERT_CHAR_UUID)) {
             byte[] data = c.getValue();
@@ -238,8 +330,30 @@ public class MainActivity extends AppCompatActivity {
                 status.setText("Alert notify: " + message);
                 showAlert(message.isEmpty() ? "Emergency gesture detected" : message);
             });
+            // handle message
+            messageHandler(message);
         }
     }
+
+    private void messageHandler(String message) {
+        runOnUiThread(() -> {
+            if (message.startsWith("CALL:")) {
+                String phoneNumber = message.substring(5).trim();
+
+//                if (hasPhonePermission()) {
+//                    status.setText("Already placed a call for you");
+//                 } else {
+//                    handlePhoneCall(phoneNumber); // now it only opens the dialer
+//                    status.setText("Open dialer");
+//                }
+                handlePhoneCall(phoneNumber); // now it only opens the dialer
+                status.setText("Open dialer");
+            }
+        });
+
+    }
+
+
 
     private void ensureNotifChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -263,18 +377,104 @@ public class MainActivity extends AppCompatActivity {
 
     // check for the appropriate permissions based on Android version
     private boolean hasBlePerms() {
-        return ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-                && ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-                && ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
+            boolean scanPerm = ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
+            boolean connectPerm = ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+            boolean locationPerm = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+            boolean phonePerm = ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
+
+            Log.d(TAG, "Permission check (Android 12+):");
+            Log.d(TAG, "  BLUETOOTH_SCAN: " + scanPerm);
+            Log.d(TAG, "  BLUETOOTH_CONNECT: " + connectPerm);
+            Log.d(TAG, "  ACCESS_FINE_LOCATION: " + locationPerm);
+            Log.d(TAG, "  CALL_PHONE: " + phonePerm);
+
+            return scanPerm && connectPerm && locationPerm && phonePerm;
+
+        } else { // Android 11 and below, the phone used is on 11
+            boolean locationPerm = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+            boolean phonePerm = ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
+
+            Log.d(TAG, "Permission check (Android 11 and below):");
+            Log.d(TAG, "  ACCESS_FINE_LOCATION: " + locationPerm);
+            Log.d(TAG, "  CALL_PHONE: " + phonePerm);
+
+            return locationPerm;
+//            return locationPerm && phonePerm;
+        }
+    }
+
+    // set a separate permission check for phone call
+    private boolean hasPhonePermission() {
+        boolean phonePerm = ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
+        Log.d(TAG, "  CALL_PHONE: " + phonePerm);
+        return phonePerm;
+    }
+
+    @SuppressLint("MissingPermission")
+    private void handlePhoneCall(String phoneNumber) {
+        // Check phone permission ONLY when calling
+//        if (!hasPhonePermission()) {
+//            Log.d(TAG, "Requesting CALL_PHONE permission");
+//            ActivityCompat.requestPermissions(this,
+//                    new String[]{Manifest.permission.CALL_PHONE}, 30);
+//            return;
+//        }
+
+        // Show notification first
+        showAlert("Calling " + phoneNumber);
+
+        try { // try DIAL for testing which open the dialer, no SIM card yet on the test phone
+            Intent dialIntent = new Intent(Intent.ACTION_DIAL);
+            dialIntent.setData(Uri.parse("tel:" + phoneNumber));
+            startActivity(dialIntent);
+        } catch (Exception e) {
+            status.setText("Failed to place call: " + e.getMessage());
+            Log.e(TAG, "Dial failed", e);
+        }
+
+        // place the call
+//        try {
+//            Intent callIntent = new Intent(Intent.ACTION_CALL);
+//            callIntent.setData(Uri.parse("tel:" + phoneNumber));
+//            startActivity(callIntent);
+//        } catch (Exception e) {
+//            status.setText("Failed to place call: " + e.getMessage());
+//            Log.e(TAG, "Dial failed", e);
+//        }
     }
 
     private void requestBlePermsIfNeeded() {
         if (!hasBlePerms()) {
-            ActivityCompat.requestPermissions(this, new String[] {
-                    android.Manifest.permission.BLUETOOTH_SCAN,
-                    android.Manifest.permission.BLUETOOTH_CONNECT,
-                    android.Manifest.permission.ACCESS_FINE_LOCATION
-            }, 20);
+            Log.d(TAG, "Requesting permissions...");
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
+                ActivityCompat.requestPermissions(this, new String[] {
+                        Manifest.permission.BLUETOOTH_SCAN,
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.CALL_PHONE
+                }, 20);
+            } else { // Android 11 and below
+                ActivityCompat.requestPermissions(this, new String[] {
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.CALL_PHONE,
+                        Manifest.permission.BLUETOOTH,
+                        Manifest.permission.BLUETOOTH_ADMIN
+                }, 20);
+            }
+
+            Log.d(TAG, "Permission request dialog should appear now");
+        }
+    }
+
+    // separate perm check for phone call
+    private void requestPhonePermIfNeeded() {
+        if (!hasPhonePermission()) {
+            Log.d(TAG, "Requesting phone permission...");
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.CALL_PHONE}, 30);
         }
     }
 

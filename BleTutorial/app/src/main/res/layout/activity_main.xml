@@ -35,14 +35,27 @@
         android:id="@+id/scanNConnect"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:layout_marginEnd="16dp"
+        android:layout_marginStart="152dp"
+        android:layout_marginTop="108dp"
         android:backgroundTint="@color/indigo"
         android:text="Connect"
         android:textColor="@android:color/white"
+        app:layout_constraintHorizontal_chainStyle="packed"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/testAlert"
-        app:layout_constraintHorizontal_chainStyle="packed" />
+        app:layout_constraintTop_toBottomOf="@id/testAlert" />
+
+    <Button
+        android:id="@+id/phoneCall"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="368dp"
+        android:backgroundTint="@color/indigo"
+        android:text="Test Call"
+        android:textColor="@android:color/white"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.488"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/status" />
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>
