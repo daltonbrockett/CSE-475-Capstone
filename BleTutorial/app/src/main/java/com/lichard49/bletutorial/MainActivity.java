@@ -251,6 +251,23 @@ public class MainActivity extends AppCompatActivity {
 
 
         }
+
+        @Override
+        public void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor descriptor, int statusGatt) {
+            super.onDescriptorWrite(g, descriptor, statusGatt);
+            if (descriptor != null && CCCD_UUID.equals(descriptor.getUuid())) {
+                final String msg = (statusGatt == BluetoothGatt.GATT_SUCCESS)
+                        ? "Notification subscription active"
+                        : ("CCCD write failed: " + statusGatt);
+                runOnUiThread(() -> status.setText(msg));
+            }
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic characteristic) {
+            super.onCharacteristicChanged(g, characteristic);
+            onCharacteristicUpdate(g, characteristic);
+        }
     };
 
     @SuppressLint("MissingPermission")
@@ -424,24 +441,24 @@ public class MainActivity extends AppCompatActivity {
         // Show notification first
         showAlert("Calling " + phoneNumber);
 
-        try { // try DIAL for testing which open the dialer, no SIM card yet on the test phone
-            Intent dialIntent = new Intent(Intent.ACTION_DIAL);
-            dialIntent.setData(Uri.parse("tel:" + phoneNumber));
-            startActivity(dialIntent);
-        } catch (Exception e) {
-            status.setText("Failed to place call: " + e.getMessage());
-            Log.e(TAG, "Dial failed", e);
-        }
-
-        // place the call
-//        try {
-//            Intent callIntent = new Intent(Intent.ACTION_CALL);
-//            callIntent.setData(Uri.parse("tel:" + phoneNumber));
-//            startActivity(callIntent);
+//        try { // try DIAL for testing which open the dialer, no SIM card yet on the test phone
+//            Intent dialIntent = new Intent(Intent.ACTION_DIAL);
+//            dialIntent.setData(Uri.parse("tel:" + phoneNumber));
+//            startActivity(dialIntent);
 //        } catch (Exception e) {
 //            status.setText("Failed to place call: " + e.getMessage());
 //            Log.e(TAG, "Dial failed", e);
 //        }
+
+        // place the call
+        try {
+            Intent callIntent = new Intent(Intent.ACTION_CALL);
+            callIntent.setData(Uri.parse("tel:" + phoneNumber));
+            startActivity(callIntent);
+        } catch (Exception e) {
+            status.setText("Failed to place call: " + e.getMessage());
+            Log.e(TAG, "Dial failed", e);
+        }
     }
 
     private void requestBlePermsIfNeeded() {
