@@ -16,6 +16,7 @@ import android.os.Bundle;
 import android.os.Build;
 import android.util.Log;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -43,6 +44,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "BLE_Debug";
     private static final String CHANNEL_ID = "alerts";
     private TextView status; // text
+    private EditText phoneInput;
     private BluetoothLeScanner scanner;
     private BluetoothAdapter adapter;
     private Button scanButton;
@@ -287,7 +289,7 @@ public class MainActivity extends AppCompatActivity {
         status = findViewById(R.id.status);
         Button testAlert = findViewById(R.id.testAlert);
         scanButton = findViewById(R.id.scanNConnect);
-
+        phoneInput = findViewById(R.id.phoneNumberInput);
 
         // for notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -333,8 +335,20 @@ public class MainActivity extends AppCompatActivity {
 //                status.setText("Phone permission already granted!");
 //            }
 //        });
-        enableCalling.setOnClickListener(v -> {status.setText("Scanning for nearby devices"); handlePhoneCall("2062014760");});
+//        enableCalling.setOnClickListener(v -> {status.setText("Scanning for nearby devices"); handlePhoneCall("2062014760");});
+        enableCalling.setOnClickListener(v -> {
+            // Get text from user input
+            String numberToCall = phoneInput.getText().toString().trim();
 
+            if (numberToCall.isEmpty()) {
+                status.setText("Error: Please enter a phone number");
+                return; // Stop execution
+            }
+
+            // 3. Update status and call
+            status.setText("Calling " + numberToCall + "...");
+            handlePhoneCall(numberToCall);
+        });
     }
 
     // c: data channel from pi

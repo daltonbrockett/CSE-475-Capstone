@@ -16,7 +16,7 @@ class AlertService(Service):
     
     def __init__(self):
         super().__init__(SERVICE_UUID, True)
-        self._value = b"Ready"
+        self._value = b"Ready"  # Initial value
     
     @characteristic(CHAR_UUID, Flags.READ | Flags.NOTIFY)
     def alert_char(self, options):
