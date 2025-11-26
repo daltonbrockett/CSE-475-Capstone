@@ -64,7 +64,7 @@ async def main():
  
     
     # simulate gesture detection for testing
-    test_messages = "CALL:2062221234"
+    test_messages = "CALL:2061112222"
 
     while True:
         alert_service.send_alert(test_messages)
