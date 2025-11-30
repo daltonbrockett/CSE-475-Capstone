@@ -3,6 +3,7 @@ from bluez_peripheral.gatt.service import Service
 from bluez_peripheral.gatt.characteristic import characteristic, CharacteristicFlags as Flags
 from bluez_peripheral.util import get_message_bus, Adapter
 from bluez_peripheral.advert import Advertisement
+from bluez_peripheral.agent import NoIoAgent
 
 SERVICE_UUID = "11111111-2222-3333-4444-56789abcdef0"
 CHAR_UUID    = "11111111-2222-3333-4444-56789abcdef1"
@@ -24,6 +25,9 @@ async def main():
     bus = await get_message_bus()
     svc = DemoService()
     await svc.register(bus)
+    
+    agent = NoIoAgent()
+    await agent.register(bus)
 
     adapter = await Adapter.get_first(bus)
     advert = Advertisement("PiBLE", [SERVICE_UUID], appearance=0x0000, timeout=0)

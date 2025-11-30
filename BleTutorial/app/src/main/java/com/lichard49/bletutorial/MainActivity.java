@@ -11,6 +11,7 @@ import android.bluetooth.le.ScanRecord;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -43,12 +44,15 @@ import android.bluetooth.BluetoothGattDescriptor;
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "BLE_Debug";
     private static final String CHANNEL_ID = "alerts";
+    private static final String PREFS_NAME = "ble_prefs";
+    private static final String KEY_LAST_DEVICE_ADDRESS = "last_device_address";
     private TextView status; // text
     private EditText phoneInput;
     private BluetoothLeScanner scanner;
     private BluetoothAdapter adapter;
     private Button scanButton;
     private BluetoothGatt gatt;
+    private SharedPreferences prefs;
 
     // replace with actual UUID and pi name
     private static final String TARGET_NAME = "RPi";
@@ -125,7 +129,8 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> status.setText("Attempting connection..."));
                 Log.d(TAG, "Calling connectGatt()...");
 
-                connectGatt(device);
+                rememberDevice(device.getAddress());
+                connectGatt(device, false);
 
                 Log.d(TAG, "connectGatt() returned");
             } else {
@@ -143,6 +148,10 @@ public class MainActivity extends AppCompatActivity {
 
     @SuppressLint("MissingPermission")
     private void startScan() {
+        if (tryConnectRememberedDevice()) {
+            return;
+        }
+
         if (!hasBlePerms()) {
             requestBlePermsIfNeeded();
             return;
@@ -157,7 +166,7 @@ public class MainActivity extends AppCompatActivity {
 
     /* Gatt connection setup*/
     @SuppressLint("MissingPermission")
-    private void connectGatt(BluetoothDevice device) {
+    private void connectGatt(BluetoothDevice device, boolean autoConnect) {
 
         Log.d(TAG, "Inside connectGatt() method");
         runOnUiThread(() -> status.setText("Inside connectGatt() - checking permissions..."));
@@ -173,7 +182,7 @@ public class MainActivity extends AppCompatActivity {
         runOnUiThread(() -> status.setText("Permissions OK, creating GATT connection..."));
 
         try {
-            gatt = device.connectGatt(getApplicationContext(), false, gattCallback);
+            gatt = device.connectGatt(getApplicationContext(), autoConnect, gattCallback);
 
             if (gatt != null) {
                 Log.d(TAG, "GATT object created successfully");
@@ -198,6 +207,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                rememberDevice(g.getDevice().getAddress());
                 runOnUiThread(() -> status.setText("Connected. Discovering services..."));
                 gatt = g;
                 gatt.discoverServices();
@@ -290,6 +300,7 @@ public class MainActivity extends AppCompatActivity {
         Button testAlert = findViewById(R.id.testAlert);
         scanButton = findViewById(R.id.scanNConnect);
         phoneInput = findViewById(R.id.phoneNumberInput);
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
         // for notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -384,7 +395,39 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
+    private boolean tryConnectRememberedDevice() {
+        if (!hasBlePerms()) {
+            requestBlePermsIfNeeded();
+            return true; // permissions dialog will take over
+        }
+        if (adapter == null || !adapter.isEnabled()) {
+            status.setText("Bluetooth is not available");
+            return true;
+        }
 
+        String address = prefs.getString(KEY_LAST_DEVICE_ADDRESS, null);
+        if (address == null) {
+            return false;
+        }
+
+        try {
+            BluetoothDevice device = adapter.getRemoteDevice(address);
+            if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
+                status.setText("Connecting to saved device...");
+                connectGatt(device, true);
+                return true;
+            }
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "Saved device address invalid, clearing", e);
+            prefs.edit().remove(KEY_LAST_DEVICE_ADDRESS).apply();
+        }
+
+        return false;
+    }
+
+    private void rememberDevice(String address) {
+        prefs.edit().putString(KEY_LAST_DEVICE_ADDRESS, address).apply();
+    }
 
     private void ensureNotifChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
