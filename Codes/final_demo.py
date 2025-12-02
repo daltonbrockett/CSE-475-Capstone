@@ -397,22 +397,6 @@ def main():
                 sequence_pause_start = None
                 buzzer_pwm.ChangeDutyCycle(0)
 
-            # Emergency hold progress bar
-            if emergency_gesture_detected and gesture_start_time is not None:
-                hold_duration = current_time - gesture_start_time
-                progress = min(hold_duration / EMERGENCY_HOLD_TIME, 1.0)
-                bar_width = 200
-                bar_filled = int(bar_width * progress)
-                cv2.rectangle(image_bgr, (10, 80), (10 + bar_width, 110), (50, 50, 50), -1)
-                cv2.rectangle(image_bgr, (10, 80), (10 + bar_filled, 110), (0, 0, 255), -1)
-                cv2.putText(image_bgr, f"HOLD: {hold_duration:.1f}s / {EMERGENCY_HOLD_TIME}s",
-                            (15, 102), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-            # Display BLE status
-            ble_status = "BLE: Connected" if alert_service and alert_service._notifying else "BLE: Waiting..."
-            cv2.putText(image_bgr, ble_status, (24, image_bgr.shape[0] - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0) if alert_service and alert_service._notifying else (0, 0, 255), 2)
-
             if not HEADLESS:
                 cv2.imshow('Integrated Gesture + BLE Control', image_bgr)
                 if cv2.waitKey(1) & 0xFF == 27:  # ESC to exit
