@@ -64,7 +64,7 @@ THUMBS_UP_FREQ = 1046  # Middle C continuous tone
 
 # Gesture hold and blink constants
 EMERGENCY_GESTURE = 'pointing_up'  # Changed to pointing_up
-EMERGENCY_CONTACT = "2061112222"
+EMERGENCY_CONTACT = "2068254849"
 EMERGENCY_HOLD_TIME = 3.0          # Hold time for emergency trigger
 BLINK_INTERVAL = 0.5               # Blink interval (0.5s on/off)
 BLINK_DURATION = 5.0               # Total blink time (5s)
