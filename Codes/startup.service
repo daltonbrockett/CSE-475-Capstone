@@ -1,0 +1,15 @@
+[Unit]
+Description=Final Gesture Demo
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/kwang522/Desktop/projects/MediaPipe-Installation-on-RaspberryPi/Codes
+ExecStart=/bin/bash /home/kwang522/Desktop/projects/MediaPipe-Installation-on-RaspberryPi/Codes/start_final_demo.sh
+Environment=HEADLESS=1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+
