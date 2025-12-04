@@ -60,6 +60,13 @@ BLINK_INTERVAL = 0.5
 BLINK_DURATION = 5.0
 COOLDOWN_TIME = 10.0
 
+# Swipe detection variables
+swipe_positions = []  # recent X positions of index fingertip
+SWIPE_HISTORY_LENGTH = 5  # frames
+SWIPE_THRESHOLD = 0.1     # min normalized X movement for swipe
+SWIPE_COOLDOWN = 1.0     # seconds cooldown between swipes
+last_swipe_time = 0
+
 # GPIO pins for LEDs/buzzer based on gestures
 GPIO_PINS = {
     'open_palm': 17,
@@ -139,6 +146,15 @@ mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 mp_hands = mp.solutions.hands
 
+def detect_swipe_right_to_left(positions):
+    """Detect left-to-right swipe using index fingertip X positions"""
+    if len(positions) < SWIPE_HISTORY_LENGTH:
+        return False
+    # Detect significant movement left to right
+    if positions[-1] - positions[0] > SWIPE_THRESHOLD:
+        return True
+    return False
+
 def trigger_emergency_alert():
     # Sends emergency call message via BLE with cooldown
     global alert_service, last_emergency_time
@@ -180,6 +196,7 @@ def main():
     global pointing_up_start_time, blink_start_time, toggle_states
     global ldr_charging, ldr_charge_start, ldr_measuring, ldr_start_time
     global ldr_reset_charge_needed, ldr_timeout_cooldown, ldr_last_timeout
+    global swipe_positions, last_swipe_time
 
     # Start BLE in background thread
     ble_thread = threading.Thread(target=run_ble_server, daemon=True)
@@ -193,7 +210,7 @@ def main():
     try:
         while True:
             current_time = time.time()
-
+            
             # LDR: Charge/discharge cycle to detect ambient light level
             if ldr_charging:
                 charge_duration = 4.0 if ldr_reset_charge_needed else 2.0
@@ -251,10 +268,9 @@ def main():
 
             # Turn off non-toggle pins by default
             for gesture, pin in GPIO_PINS.items():
-                if gesture not in ['open_palm', 'closed_fist', 'pointing_up']:
+                if gesture not in ['open_palm', 'closed_fist']:
                     GPIO.output(pin, GPIO.LOW)
 
-            # Gesture status flags
             other_gesture_active = False
             found_iloveyou = False
             found_thumb_up = False
@@ -267,12 +283,30 @@ def main():
                     if hand_index < len(result.gestures):
                         gestures_for_hand = result.gestures[hand_index]
                         if gestures_for_hand:
+                            # Track index fingertip X for swipe detection (landmark 8)
+                            x_pos = hand_landmarks[8].x  # Index finger tip
+                            swipe_positions.append(x_pos)
+                            if len(swipe_positions) > SWIPE_HISTORY_LENGTH:
+                                swipe_positions.pop(0)
+
+                            # Check for swipe left-to-right (turns off pins 17/18 + resets emergency)
+                            if (current_time - last_swipe_time) > SWIPE_COOLDOWN:
+                                if detect_swipe_right_to_left(swipe_positions):
+                                    GPIO.output(GPIO_PINS['open_palm'], GPIO.LOW)
+                                    GPIO.output(GPIO_PINS['closed_fist'], GPIO.LOW)
+                                    toggle_states['open_palm'] = False
+                                    toggle_states['closed_fist'] = False
+                                    last_swipe_time = current_time
+                                    # Reset emergency gesture timer to prevent accidents
+                                    gesture_start_time = None
+                                    emergency_triggered = False
+
                             gesture = gestures_for_hand[0]
                             category_name = gesture.category_name.lower()
                             score = round(gesture.score, 2)
                             gesture_changed = (last_detected_gesture != category_name) or (not hand_was_visible)
 
-                            # Handle emergency gesture with hold timer and blink feedback
+                            # ---------- EMERGENCY GESTURE (triggers alert only) ----------
                             if category_name == EMERGENCY_GESTURE:
                                 emergency_gesture_detected = True
                                 if gesture_start_time is None:
@@ -280,19 +314,10 @@ def main():
                                     emergency_triggered = False
                                 hold_duration = current_time - gesture_start_time
                                 if hold_duration >= EMERGENCY_HOLD_TIME and not emergency_triggered:
-                                    trigger_emergency_alert()
+                                    alert_sent = trigger_emergency_alert()
+                                    if alert_sent:
+                                        blink_start_time = current_time  # Start independent 5-sec blink
                                     emergency_triggered = True
-                                    blink_start_time = current_time
-
-                                if emergency_triggered and blink_start_time is not None:
-                                    elapsed_blink = current_time - blink_start_time
-                                    if elapsed_blink <= BLINK_DURATION:
-                                        blink_phase = (elapsed_blink % BLINK_INTERVAL) < (BLINK_INTERVAL / 2)
-                                        GPIO.output(GPIO_PINS[EMERGENCY_GESTURE], blink_phase)
-                                    else:
-                                        GPIO.output(GPIO_PINS[EMERGENCY_GESTURE], GPIO.LOW)
-                                else:
-                                    GPIO.output(GPIO_PINS[EMERGENCY_GESTURE], GPIO.LOW)
                                 other_gesture_active = True
 
                             elif category_name == 'victory':
@@ -304,17 +329,16 @@ def main():
                                 GPIO.output(GPIO_PINS['open_palm'], GPIO.HIGH)
                                 GPIO.output(GPIO_PINS['closed_fist'], GPIO.HIGH)
                                 other_gesture_active = True
+                                # Reset timers related to pointing_up/emergency
                                 pointing_up_start_time = None
                                 gesture_start_time = None
                                 emergency_triggered = False
-                                blink_start_time = None
 
                             else:
+                                # Reset timers on gesture change (other than pointing_up)
                                 pointing_up_start_time = None
                                 gesture_start_time = None
                                 emergency_triggered = False
-                                blink_start_time = None
-                                GPIO.output(GPIO_PINS['pointing_up'], GPIO.LOW)
 
                                 if category_name == 'thumb_up':
                                     found_thumb_up = True
@@ -323,12 +347,13 @@ def main():
                                     found_iloveyou = True
                                     other_gesture_active = True
                                 elif category_name in ['open_palm', 'closed_fist']:
-                                    if gesture_changed:
+                                    # FIXED: Toggle when gesture reappears after being absent
+                                    if last_detected_gesture != category_name or not hand_was_visible:
                                         toggle_states[category_name] = not toggle_states[category_name]
                                     other_gesture_active = True
                                     last_detected_gesture = category_name
 
-                            # Draw gesture label and hand landmarks
+                            # Draw gesture label
                             label_text = f'{category_name} ({score})'
                             x_min = min(lm.x for lm in hand_landmarks)
                             y_min = min(lm.y for lm in hand_landmarks)
@@ -338,6 +363,7 @@ def main():
                             cv2.putText(image_bgr, label_text, (x_min_px, max(y_min_px, 20)),
                                        cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
+                            # Hand landmarks drawing
                             hand_proto = landmark_pb2.NormalizedLandmarkList()
                             hand_proto.landmark.extend(
                                 [landmark_pb2.NormalizedLandmark(x=lm.x, y=lm.y, z=lm.z) for lm in hand_landmarks]
@@ -355,22 +381,33 @@ def main():
                 pointing_up_start_time = None
                 gesture_start_time = None
                 emergency_triggered = False
-                blink_start_time = None
-                GPIO.output(GPIO_PINS['pointing_up'], GPIO.LOW)
 
+            # Runs full 5 seconds after alert sent, regardless of gesture presence
+            if blink_start_time is not None:
+                elapsed_blink = current_time - blink_start_time
+                if elapsed_blink <= BLINK_DURATION:
+                    blink_phase = (elapsed_blink % BLINK_INTERVAL) < (BLINK_INTERVAL / 2)
+                    GPIO.output(GPIO_PINS[EMERGENCY_GESTURE], blink_phase)
+                else:
+                    blink_start_time = None  # Blink sequence complete
+                    GPIO.output(GPIO_PINS[EMERGENCY_GESTURE], GPIO.LOW)
+            else:
+                GPIO.output(GPIO_PINS[EMERGENCY_GESTURE], GPIO.LOW)
+
+            # Reset emergency gesture timer if not detected
             if not emergency_gesture_detected:
+                if gesture_start_time is not None:
+                    pass  # Silent reset
                 gesture_start_time = None
                 emergency_triggered = False
-                blink_start_time = None
-                GPIO.output(GPIO_PINS['pointing_up'], GPIO.LOW)
 
-            # Update GPIO output for toggle gestures
+            # Apply toggle states for open_palm and closed_fist
             GPIO.output(GPIO_PINS['open_palm'], GPIO.HIGH if toggle_states['open_palm'] else GPIO.LOW)
             GPIO.output(GPIO_PINS['closed_fist'], GPIO.HIGH if toggle_states['closed_fist'] else GPIO.LOW)
 
-            # Buzzer control prioritization
+            # BUZZER LOGIC - PRIORITIZED (victory > thumbs_up > iloveyou > silence)
             if found_victory:
-                pass
+                pass # Victory buzzer handled in gesture logic
             elif found_thumb_up:
                 buzzer_pwm.ChangeFrequency(THUMBS_UP_FREQ)
                 buzzer_pwm.ChangeDutyCycle(50)
@@ -406,20 +443,23 @@ def main():
                 buzzer_pwm.ChangeDutyCycle(0)
 
             if not HEADLESS:
-                cv2.imshow('Integrated Gesture + BLE Control + LDR', image_bgr)
-                if cv2.waitKey(1) & 0xFF == 27:
+                cv2.imshow('Integrated Gesture + BLE Control + LDR + Swipe', image_bgr)
+                if cv2.waitKey(1) & 0xFF == 27: # ESC to exit
                     break
 
     finally:
-        # Reset and cleanup GPIO and peripherals safely
+        # Safe cleanup
         buzzer_pwm.ChangeDutyCycle(0)
         buzzer_pwm.stop()
+        
+        # Only cleanup OUTPUT pins (exclude LDR_OUT_PIN which is INPUT)
         output_pins = [p for p in ALL_GPIO_PINS if p != LDR_OUT_PIN]
         for pin in output_pins:
             try:
                 GPIO.output(pin, GPIO.LOW)
             except:
                 pass
+        
         GPIO.cleanup()
         recognizer.close()
         picam2.stop()
